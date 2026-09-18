@@ -62,19 +62,36 @@ jobs:
         working-directory: android-app
         run: ./gradlew --no-daemon clean assembleRelease
 
+      - name: Read Android version
+        id: version
+        working-directory: android-app
+        run: |
+          VERSION_NAME=$(sed -n 's/.*versionName[[:space:]]*"\([^"]*\)".*/\1/p' app/build.gradle | head -n 1)
+          VERSION_CODE=$(sed -n 's/.*versionCode[[:space:]]*\([0-9]*\).*/\1/p' app/build.gradle | head -n 1)
+
+          if [ -z "$VERSION_NAME" ] || [ -z "$VERSION_CODE" ]; then
+            echo "::error::Could not read versionName/versionCode from app/build.gradle"
+            exit 1
+          fi
+
+          echo "Version name: $VERSION_NAME"
+          echo "Version code: $VERSION_CODE"
+
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
       - name: Sign APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           APK="android-app/app/build/outputs/apk/release/app-release-unsigned.apk"
-          SIGNED_APK="Workspace.apk"
 
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner" \
             sign \
             --ks workspace-release.jks \
             --ks-key-alias key0 \
             --ks-pass env:KEYSTORE_PASSWORD \
-            --out "$SIGNED_APK" \
+            --out Workspace.apk \
             "$APK"
 
       - name: Verify APK signature
@@ -84,14 +101,20 @@ jobs:
             --verbose \
             Workspace.apk
 
-      - name: Remove unsigned APK and keystore
+      - name: Remove signing material
         run: |
           rm -f workspace-release.jks
           rm -f android-app/app/build/outputs/apk/release/app-release-unsigned.apk
 
-      - name: Upload signed APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Workspace.apk
-          path: Workspace.apk
-          if-no-files-found: error
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          TAG="v${VERSION_NAME}"
+
+          gh release create "$TAG" \
+            Workspace.apk \
+            --title "Workspace v${VERSION_NAME}" \
+            --notes "Workspace Android app v${VERSION_NAME} (version code ${VERSION_CODE})."
