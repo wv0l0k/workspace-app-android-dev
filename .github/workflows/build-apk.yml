@@ -3,6 +3,9 @@ name: Build Android APK
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,9 +29,31 @@ jobs:
         run: |
           if [ ! -f android-app/app/google-services.json ]; then
             echo "::error::Missing android-app/app/google-services.json"
-            echo "Add your Firebase google-services.json before running this workflow."
+            echo "Add your Firebase google-services.json before running the workflow."
             exit 1
           fi
+
+      - name: Check signing configuration
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is missing."
+            exit 1
+          fi
+
+          if [ -z "$PASSWORD" ]; then
+            echo "::error::ANDROID_KEYSTORE_PASSWORD secret is missing."
+            exit 1
+          fi
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > workspace-release.jks
+          chmod 600 workspace-release.jks
 
       - name: Make Gradle wrapper executable
         run: chmod +x android-app/gradlew
@@ -37,9 +62,36 @@ jobs:
         working-directory: android-app
         run: ./gradlew --no-daemon clean assembleRelease
 
-      - name: Upload APK
+      - name: Sign APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          APK="android-app/app/build/outputs/apk/release/app-release-unsigned.apk"
+          SIGNED_APK="Workspace.apk"
+
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner" \
+            sign \
+            --ks workspace-release.jks \
+            --ks-key-alias key0 \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --out "$SIGNED_APK" \
+            "$APK"
+
+      - name: Verify APK signature
+        run: |
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner" \
+            verify \
+            --verbose \
+            Workspace.apk
+
+      - name: Remove unsigned APK and keystore
+        run: |
+          rm -f workspace-release.jks
+          rm -f android-app/app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: workspace-android-apk
-          path: android-app/app/build/outputs/apk/release/*.apk
+          name: Workspace.apk
+          path: Workspace.apk
           if-no-files-found: error
