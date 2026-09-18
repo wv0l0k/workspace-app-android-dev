@@ -1,0 +1,20 @@
+<resources>
+    <!-- Mirrors the web app's CSS custom properties (frontend/css/style.css
+         :root block) so the native "connect to your server" screen matches
+         the web login screen's look exactly, not just approximately. -->
+    <color name="bg_app">#1a1a1a</color>
+    <color name="bg_panel">#212121</color>
+    <color name="border">#333333</color>
+    <color name="border_soft">#2a2a2a</color>
+    <color name="text">#e3e3e3</color>
+    <color name="text_muted">#93938f</color>
+    <color name="text_faint">#5f5f5c</color>
+    <color name="accent">#4a9eff</color>
+    <color name="accent_hover">#63acff</color>
+    <color name="accent_dim">#2f6fb3</color>
+    <color name="danger">#e5686c</color>
+    <color name="on_accent">#0f1720</color>
+
+    <!-- Same accent blue as the web app, so the launcher icon matches too. -->
+    <color name="ic_launcher_background">#4a9eff</color>
+</resources>

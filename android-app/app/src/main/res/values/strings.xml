@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Workspace</string>
+    <!-- Doubles as the small subtitle under the "W" logo on the connect
+         screen, matching the web login card's "Sign in to your instance". -->
+    <string name="settings_title">Connect to your server</string>
+    <string name="settings_url_hint">https://workspace.yourdomain.com</string>
+    <string name="settings_username_hint">Username</string>
+    <string name="settings_password_hint">Password</string>
+    <string name="settings_save">Connect and sign in</string>
+    <string name="settings_connecting">Connecting…</string>
+</resources>

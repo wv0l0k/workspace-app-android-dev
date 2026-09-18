@@ -1,0 +1,52 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.gms.google-services'  // reads app/google-services.json - see README
+}
+
+android {
+    namespace 'com.workspaceapp.mobile'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.workspaceapp.mobile"
+        // minSdk 26 (Android 8.0+) rather than something lower purely so the
+        // adaptive launcher icon below doesn't also need legacy raster
+        // fallback images - a personal, always-updated phone easily clears this.
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation platform('com.google.firebase:firebase-bom:34.19.0')
+    // Not -ktx: as of BoM 34.0.0, Firebase removed the KTX artifacts from the
+    // BoM entirely (their own guidance is to use the plain module - the KTX
+    // extension functions were folded into it a while back anyway, and
+    // nothing in this app used a KTX-only API in the first place).
+    implementation 'com.google.firebase:firebase-messaging'
+
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+
+    // Just for the one small POST to /api/push/register - not otherwise needed.
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}
