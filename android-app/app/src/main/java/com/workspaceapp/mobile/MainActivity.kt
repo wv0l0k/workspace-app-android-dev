@@ -8,10 +8,16 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -41,6 +47,7 @@ import java.io.IOException
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    private lateinit var offlineView: View
     private val httpClient = OkHttpClient()
 
     // WebView's own file-chooser support needs a WebChromeClient - without one,
@@ -79,6 +86,15 @@ class MainActivity : AppCompatActivity() {
 
         requestNotificationPermissionIfNeeded()
 
+        setContentView(R.layout.activity_main)
+        val root = findViewById<FrameLayout>(R.id.mainRoot)
+        offlineView = findViewById(R.id.offlineView)
+        findViewById<TextView>(R.id.offlineMessage).text = getString(R.string.offline_message, serverUrl)
+        findViewById<Button>(R.id.offlineRetryButton).setOnClickListener {
+            hideOffline()
+            Prefs.getServerUrl(this)?.let { webView.loadUrl(it) }
+        }
+
         webView = WebView(this)
         webView.settings.javaScriptEnabled = true
         // Off by default in WebView (unlike a real browser) - without this,
@@ -100,10 +116,35 @@ class MainActivity : AppCompatActivity() {
         // that's how it treats Logout as a full "disconnect" (see app.js) and
         // adopts a pending native login token at boot (see WebAppInterface).
         webView.addJavascriptInterface(WebAppInterface(this), "AndroidApp")
+        webView.visibility = View.GONE // shown once something has actually loaded - see onPageFinished/showOffline below
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                // Reaching here at all (as opposed to onReceivedError above) means this
+                // navigation succeeded, so whatever offline screen might be showing -
+                // from an earlier failed attempt - no longer applies.
+                if (url != "about:blank") hideOffline()
                 tryRegisterPushToken()
+            }
+
+            // Fires when a navigation fails outright at the network level - no
+            // connection, DNS failure, and so on (what a phone shows as
+            // "net::ERR_FAILED"). This is different from a page that loaded but is
+            // now offline mid-session - that's handled entirely in JS, by the small
+            // "You're offline" banner the page shows itself once it has something
+            // cached to fall back on (see frontend/js/app.js). This callback only
+            // fires when there was nothing to fall back on at all: nothing has ever
+            // loaded successfully in this WebView, so there's no cached copy of the
+            // app's own page for it to show instead. WebView still renders its own
+            // plain, browser-style error page for this by default regardless of what
+            // this callback does - loadUrl("about:blank") below, plus showing our own
+            // matching-styled screen on top, is what actually replaces it.
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame == true) {
+                    view?.loadUrl("about:blank")
+                    showOffline()
+                }
             }
         }
         webView.webChromeClient = object : WebChromeClient() {
@@ -132,7 +173,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        setContentView(webView)
+        root.addView(webView, 0, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
         // Ask Firebase for the current token up front too, in case onNewToken
         // (in MyFirebaseMessagingService) hasn't fired yet on this install.
@@ -210,6 +251,16 @@ class MainActivity : AppCompatActivity() {
                 response.close()
             }
         })
+    }
+
+    private fun showOffline() {
+        webView.visibility = View.GONE
+        offlineView.visibility = View.VISIBLE
+    }
+
+    private fun hideOffline() {
+        offlineView.visibility = View.GONE
+        webView.visibility = View.VISIBLE
     }
 
     private fun requestNotificationPermissionIfNeeded() {

@@ -8,4 +8,13 @@
     <string name="settings_password_hint">Password</string>
     <string name="settings_save">Connect and sign in</string>
     <string name="settings_connecting">Connecting…</string>
+
+    <!-- Shown instead of WebView's own bare "Web page not available" browser-chrome
+         error page, for when the very first connection to the server fails outright
+         (DNS/connection failure - not the same as the small in-app "You're offline"
+         banner, which only appears once the app itself has already loaded, from an
+         earlier successful visit, and is served from the on-device cache). -->
+    <string name="offline_title">Can\'t reach your server</string>
+    <string name="offline_message">Check your connection, or that %1$s is reachable, and try again.</string>
+    <string name="offline_retry">Retry</string>
 </resources>
