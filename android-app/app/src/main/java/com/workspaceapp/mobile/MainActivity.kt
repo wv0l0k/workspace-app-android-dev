@@ -91,6 +91,17 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Lets a desktop Chrome browser attach real DevTools to this app's WebView -
+        // console errors, network requests, the actual rendered DOM - over a USB
+        // connection: plug the phone in, enable USB debugging, then open
+        // chrome://inspect on the computer and click "inspect" under this app. Far
+        // more useful for tracking down a rendering problem than logcat, which mixes
+        // in the entire system's own noise. Left enabled unconditionally rather than
+        // gated to debug builds - this app has no Play Store listing or other users
+        // to expose, so there's no real downside to always being able to do this on a
+        // build already installed for troubleshooting.
+        WebView.setWebContentsDebuggingEnabled(true)
+
         val serverUrl = Prefs.getServerUrl(this)
         if (serverUrl.isNullOrBlank()) {
             startActivity(Intent(this, SettingsActivity::class.java))
@@ -140,12 +151,31 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                if (url == "about:blank") return // the deliberate blank we load before showing the offline screen ourselves - nothing to check
                 cancelNavigationTimeout()
-                // Reaching here at all (as opposed to onReceivedError above) means this
-                // navigation succeeded, so whatever offline screen might be showing -
-                // from an earlier failed attempt - no longer applies.
-                if (url != "about:blank") hideOffline()
-                tryRegisterPushToken()
+
+                // onPageFinished firing only means WebView committed *a* response for
+                // the navigation - not that the page it got is actually this app.
+                // A grey or white screen with nothing on it is exactly what a
+                // "successful" navigation to essentially empty content looks like, so
+                // check for the one thing that's always present the moment the real
+                // page's HTML has actually parsed (the login screen or the main app
+                // shell - see index.html), regardless of whether anything past that,
+                // like the JS boot sequence, still has problems of its own. Those
+                // further-along failures already show their own in-app error states;
+                // this check is only for "did the real page even arrive at all."
+                val loadedView = view ?: return
+                loadedView.evaluateJavascript(
+                    "!!(document.getElementById('app') || document.getElementById('login-screen'))"
+                ) { result ->
+                    if (result == "true") {
+                        hideOffline()
+                        tryRegisterPushToken()
+                    } else {
+                        loadedView.loadUrl("about:blank")
+                        showOffline()
+                    }
+                }
             }
 
             // Fires when a navigation fails outright at the network level - no
