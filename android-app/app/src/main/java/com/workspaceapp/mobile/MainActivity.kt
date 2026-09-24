@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -49,6 +51,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var offlineView: View
     private val httpClient = OkHttpClient()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var navigationTimeoutRunnable: Runnable? = null
+
+    // How long to wait for a navigation to actually finish (onPageFinished) or fail
+    // outright (onReceivedError) before giving up on it ourselves. Set well above
+    // sw.js's own NAV_TIMEOUT_MS (3s) - once a service worker is controlling the page,
+    // it always resolves a navigation within that window, one way or another, so
+    // anything still hanging well past it is stuck for some other reason (a WebView-
+    // level glitch, not a slow connection) rather than something worth waiting longer
+    // for. Better to land on the offline screen - and its working Retry button - than
+    // stay on a blank WebView indefinitely.
+    private val NAVIGATION_TIMEOUT_MS = 8000L
 
     // WebView's own file-chooser support needs a WebChromeClient - without one,
     // the page's <input type="file"> (used by the image-insert button) silently
@@ -92,7 +106,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.offlineMessage).text = getString(R.string.offline_message, serverUrl)
         findViewById<Button>(R.id.offlineRetryButton).setOnClickListener {
             hideOffline()
-            Prefs.getServerUrl(this)?.let { webView.loadUrl(it) }
+            Prefs.getServerUrl(this)?.let { loadWithTimeout(it) }
         }
 
         webView = WebView(this)
@@ -116,10 +130,17 @@ class MainActivity : AppCompatActivity() {
         // that's how it treats Logout as a full "disconnect" (see app.js) and
         // adopts a pending native login token at boot (see WebAppInterface).
         webView.addJavascriptInterface(WebAppInterface(this), "AndroidApp")
+        // WebView's own default surface is plain white until real content actually
+        // paints on top of it - matching the app's own background here means any gap
+        // between "WebView says the navigation finished" and "the page has actually
+        // drawn something" reads as this app's normal background, not a stray flash
+        // of blank white.
+        webView.setBackgroundColor(ContextCompat.getColor(this, R.color.bg_app))
         webView.visibility = View.GONE // shown once something has actually loaded - see onPageFinished/showOffline below
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                cancelNavigationTimeout()
                 // Reaching here at all (as opposed to onReceivedError above) means this
                 // navigation succeeded, so whatever offline screen might be showing -
                 // from an earlier failed attempt - no longer applies.
@@ -142,6 +163,7 @@ class MainActivity : AppCompatActivity() {
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame == true) {
+                    cancelNavigationTimeout()
                     view?.loadUrl("about:blank")
                     showOffline()
                 }
@@ -207,10 +229,33 @@ class MainActivity : AppCompatActivity() {
         val workspaceId = intent?.getStringExtra("workspace_id")
         val kind = intent?.getStringExtra("kind")
         if (!itemId.isNullOrBlank() && !workspaceId.isNullOrBlank() && !kind.isNullOrBlank()) {
-            webView.loadUrl("$serverUrl/#/w/$workspaceId/$kind/i/$itemId")
+            loadWithTimeout("$serverUrl/#/w/$workspaceId/$kind/i/$itemId")
         } else if (webView.url.isNullOrBlank()) {
-            webView.loadUrl(serverUrl)
+            loadWithTimeout(serverUrl)
         }
+    }
+
+    /**
+     * Starts a navigation and arms the timeout above for it. Every top-level
+     * webView.loadUrl() in this Activity goes through here (deep links, the plain
+     * server URL, and the Retry button) rather than calling loadUrl() directly, so
+     * none of them can silently hang with nothing shown if a navigation just never
+     * resolves.
+     */
+    private fun loadWithTimeout(url: String) {
+        cancelNavigationTimeout()
+        val runnable = Runnable {
+            navigationTimeoutRunnable = null
+            if (webView.visibility != View.VISIBLE) showOffline()
+        }
+        navigationTimeoutRunnable = runnable
+        mainHandler.postDelayed(runnable, NAVIGATION_TIMEOUT_MS)
+        webView.loadUrl(url)
+    }
+
+    private fun cancelNavigationTimeout() {
+        navigationTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        navigationTimeoutRunnable = null
     }
 
     /**
