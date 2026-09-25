@@ -115,9 +115,16 @@ class MainActivity : AppCompatActivity() {
         val root = findViewById<FrameLayout>(R.id.mainRoot)
         offlineView = findViewById(R.id.offlineView)
         findViewById<TextView>(R.id.offlineMessage).text = getString(R.string.offline_message, serverUrl)
-        findViewById<Button>(R.id.offlineRetryButton).setOnClickListener {
-            hideOffline()
-            Prefs.getServerUrl(this)?.let { loadWithTimeout(it) }
+        val retryButton = findViewById<Button>(R.id.offlineRetryButton)
+        retryButton.setOnClickListener {
+            // Deliberately NOT hideOffline() here: that would reveal the WebView
+            // immediately, showing whatever it currently has loaded (about:blank, from
+            // the last failure) regardless of whether this retry actually succeeds.
+            // The offline screen stays up - with the button disabled so a slow retry
+            // can't be stacked with another one - until onPageFinished's content check,
+            // onReceivedError, or the timeout actually resolves this one.
+            it.isEnabled = false
+            Prefs.getServerUrl(this)?.let { url -> loadWithTimeout(url) }
         }
 
         webView = WebView(this)
@@ -331,6 +338,7 @@ class MainActivity : AppCompatActivity() {
     private fun showOffline() {
         webView.visibility = View.GONE
         offlineView.visibility = View.VISIBLE
+        findViewById<Button>(R.id.offlineRetryButton).isEnabled = true
     }
 
     private fun hideOffline() {
