@@ -335,6 +335,13 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    // Called from WebAppInterface.clearNativeCache(), itself called from app.js's
+    // "Clear cached content" button. clearCache(true) also removes the files backing
+    // it on disk, not just the in-memory copy - the "true" the API asks for.
+    fun clearWebViewCache() {
+        webView.clearCache(true)
+    }
+
     private fun showOffline() {
         webView.visibility = View.GONE
         offlineView.visibility = View.VISIBLE
