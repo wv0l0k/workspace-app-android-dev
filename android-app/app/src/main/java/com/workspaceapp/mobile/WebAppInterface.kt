@@ -40,20 +40,4 @@ class WebAppInterface(private val activity: MainActivity) {
             activity.finish()
         }
     }
-
-    /**
-     * Called from app.js's "Clear cached content" button - deliberately separate from
-     * resetApp() above: this keeps the login token and server address untouched (see
-     * Prefs.kt), only dropping WebView's own HTTP cache. The IndexedDB and Cache
-     * Storage content this app itself manages (documents, notes, offline image
-     * copies - see sw.js) is cleared by app.js itself, from JS, where those APIs
-     * actually live; this only covers the separate, native-side cache JS has no
-     * access to.
-     */
-    @JavascriptInterface
-    fun clearNativeCache() {
-        Handler(Looper.getMainLooper()).post {
-            activity.clearWebViewCache()
-        }
-    }
 }
