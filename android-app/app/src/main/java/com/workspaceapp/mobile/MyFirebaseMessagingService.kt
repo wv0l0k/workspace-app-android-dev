@@ -74,7 +74,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             // someone expand it (swipe down) to read the rest of a longer
             // preview, e.g. the back half of a shopping list.
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setSmallIcon(R.drawable.ic_stat_workspace)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

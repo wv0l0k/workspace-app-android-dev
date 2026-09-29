@@ -39,16 +39,12 @@
             android:paddingTop="30dp"
             android:paddingBottom="24dp">
 
-            <TextView
+            <ImageView
                 android:layout_width="52dp"
                 android:layout_height="52dp"
                 android:layout_marginBottom="14dp"
-                android:background="@drawable/login_logo_bg"
-                android:gravity="center"
-                android:text="W"
-                android:textColor="@color/on_accent"
-                android:textSize="22sp"
-                android:textStyle="bold" />
+                android:src="@drawable/logo"
+                android:contentDescription="@string/app_name" />
 
             <TextView
                 android:layout_width="match_parent"

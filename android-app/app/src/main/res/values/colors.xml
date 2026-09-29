@@ -15,6 +15,9 @@
     <color name="danger">#e5686c</color>
     <color name="on_accent">#0f1720</color>
 
-    <!-- Same accent blue as the web app, so the launcher icon matches too. -->
-    <color name="ic_launcher_background">#4a9eff</color>
+    <!-- The exact blue baked into the logo artwork itself (logo-master.svg's
+         background square), used only for the launcher icon's background layer -
+         distinct from "accent" above, which is the general app accent color and a
+         close but not identical shade. -->
+    <color name="ic_launcher_background">#1a86ff</color>
 </resources>
