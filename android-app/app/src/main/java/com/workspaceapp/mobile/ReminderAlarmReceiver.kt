@@ -41,10 +41,19 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             Prefs.setLastNotified(context, notificationKey, now)
         }
 
-        // Keep nagging at the same interval the server would, until the user swipes
-        // the notification away or a sync (once back online) clears this occurrence.
-        // The alarm itself stays keyed by the occurrence; swiping the notification
-        // (keyed by item/step) cancels it through the record scheduleNextNag keeps.
+        // Record that this occurrence has been handled locally (whether or not the
+        // notification above was the one shown - FCM may have won the race). From
+        // now on, any FCM delivery for this same occurrence is a duplicate: most
+        // importantly a push FCM queued while the phone was offline and delivers on
+        // reconnect, which used to alert a second time.
+        val occurrence = intent.getLongExtra(ReminderScheduler.EXTRA_OCCURRENCE, 0L)
+        if (occurrence > 0) {
+            Prefs.setLastLocalOccurrence(context, notificationKey, occurrence)
+        }
+
+        // Keep nagging at the same interval the server would, until the task/step is
+        // marked complete (the next schedule sync then cancels this alarm). Swiping
+        // the notification away deliberately does NOT stop it.
         ReminderScheduler.scheduleNextNag(context, intent)
     }
 }

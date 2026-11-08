@@ -50,12 +50,9 @@
         </service>
 
         <!-- Offline reminder path: AlarmManager -> notification. Explicit intents
-             from this app only, so neither receiver needs to be exported. -->
+             from this app only, so the receiver does not need to be exported. -->
         <receiver
             android:name=".ReminderAlarmReceiver"
-            android:exported="false" />
-        <receiver
-            android:name=".ReminderDismissReceiver"
             android:exported="false" />
 
         <!-- Alarms are cleared by a reboot, so re-arm the saved schedule on boot

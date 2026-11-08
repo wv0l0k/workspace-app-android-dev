@@ -40,6 +40,14 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         // subtask id for a checklist step (several steps share the parent item id).
         val key = ReminderNotifications.keyFor(itemId, subtaskId)
 
+        // If the phone's local alarm already handled this same occurrence, this push
+        // is a duplicate - most commonly one FCM queued while the phone was offline
+        // and delivered on reconnect. The occurrence time (not arrival time) is what
+        // matters: a push for a genuinely later occurrence has a larger fire_at and
+        // is still shown.
+        val fireAt = message.data["fire_at"]?.toLongOrNull() ?: 0L
+        if (fireAt > 0 && Prefs.getLastLocalOccurrence(this, key) >= fireAt) return
+
         // If a local alarm for this same occurrence just fired (or is about to),
         // don't alert twice. Both paths use the same notification id, so an update
         // would still land in the right place; this just suppresses the second sound.

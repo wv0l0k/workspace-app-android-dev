@@ -8,10 +8,10 @@ import android.os.Build
 import org.json.JSONArray
 
 /**
- * Keeps the phone's own copy of the reminder schedule and turns each future entry
- * into an exact AlarmManager alarm. This is the offline half of reminders: the
- * server can only push (FCM) while the phone has a connection, but an alarm is
- * local, so it fires with no network at all.
+ * Keeps the phone's own copy of the reminder schedule and turns each outstanding
+ * entry into an exact AlarmManager alarm. This is the offline half of reminders:
+ * the server can only push (FCM) while the phone has a connection, but an alarm
+ * is local, so it fires with no network at all.
  *
  * The schedule is produced by the backend (GET /api/reminders/schedule) and
  * handed over by the frontend through WebAppInterface.setReminderSchedule().
@@ -24,7 +24,6 @@ import org.json.JSONArray
 object ReminderScheduler {
 
     const val ACTION_REMINDER = "com.workspaceapp.mobile.REMINDER"
-    const val ACTION_DISMISS = "com.workspaceapp.mobile.REMINDER_DISMISS"
 
     const val EXTRA_KEY = "key"
     const val EXTRA_TITLE = "title"
@@ -34,21 +33,28 @@ object ReminderScheduler {
     const val EXTRA_KIND = "kind"
     const val EXTRA_SUBTASK_ID = "subtask_id"
     const val EXTRA_NAG_SECONDS = "nag_seconds"
-    const val EXTRA_NAG_COUNT = "nag_count"
+
+    /** The occurrence's own absolute time (epoch seconds). Every nag for the same
+     *  occurrence carries the same value, so the FCM side can tell "this reminder
+     *  was already shown locally" apart from a genuinely newer occurrence. */
+    const val EXTRA_OCCURRENCE = "occurrence"
 
     /**
-     * Safety stop for local nagging when the phone never reconnects and the user
-     * never dismisses the notification. Without it, an unresolved task with a
-     * 1-minute interval would keep waking the device forever. The server has
-     * different behaviour (it nags until the task is done), but it also can only
-     * do that while reachable; once the app syncs again, the real schedule wins.
+     * Local nags keep going until the task/step is marked complete (the next sync
+     * then removes it from the schedule and cancels its alarm), exactly like the
+     * server's own nagging. The one exception is an occurrence more than a day old:
+     * by then a repeating reminder will have produced a newer occurrence, and a
+     * one-off should have been completed - continuing to wake the device forever
+     * about it would only ever be a stale nuisance.
      */
-    private const val MAX_NAGS = 100
+    private const val MAX_NAG_AGE_SECONDS = 24 * 60 * 60L
 
     /**
      * Replaces the stored schedule and re-arms alarms. Called after every sync, so
-     * it is deliberately idempotent: cancel everything the previous copy armed,
-     * then arm only what is current. `[]` (or `null`) means "no upcoming reminders".
+     * it must be idempotent: alarms for occurrences the new schedule no longer
+     * contains are cancelled, while occurrences that are still outstanding keep
+     * whatever alarm/nag chain they already have. `[]` (or `null`) means "no
+     * upcoming reminders".
      */
     fun saveAndSchedule(context: Context, json: String) {
         val clean = json.trim().ifEmpty { "[]" }
@@ -59,7 +65,12 @@ object ReminderScheduler {
         } catch (e: Exception) {
             return
         }
-        Prefs.getReminderSchedule(context)?.let { cancelAll(context, it) }
+        // Only cancel what is genuinely no longer in the schedule (completed,
+        // deleted, or edited to a different time). Occurrences still present -
+        // including an already-due "active" one that is still nagging - keep their
+        // existing alarm, so a sync doesn't restart/stop their nag chain.
+        val keep = keysOf(entries)
+        Prefs.getReminderSchedule(context)?.let { cancelMissing(context, it, keep) }
         Prefs.setReminderSchedule(context, clean)
         scheduleAll(context, entries)
     }
@@ -87,24 +98,46 @@ object ReminderScheduler {
             val o = entries.optJSONObject(i) ?: continue
             val key = o.optString("key")
             if (key.isBlank()) continue
-            val fireAtMillis = o.optLong("fire_at", 0L) * 1000L
-            // Only future occurrences. Anything already due is the server's live
-            // reminder loop's job (and firing every past occurrence on app open
-            // would mean a pile of stale notifications after being offline).
-            if (fireAtMillis <= now) continue
+            val occurrenceEpoch = o.optLong("fire_at", 0L)
+            val fireAtMillis = occurrenceEpoch * 1000L
+            val nag = if (o.isNull("nag_seconds")) null else o.optInt("nag_seconds").takeIf { it > 0 }
+
+            val nextMillis: Long
+            if (fireAtMillis > now) {
+                // A normal future occurrence: arm it for its exact time.
+                nextMillis = fireAtMillis
+            } else if (nag != null && occurrenceEpoch > 0 &&
+                now / 1000 - occurrenceEpoch <= MAX_NAG_AGE_SECONDS) {
+                // Already due but still in the stored schedule: it was outstanding
+                // at the last sync and the server has not reported it completed, so
+                // keep the reminder alive. If its nag alarm is already armed, leave
+                // it alone - resetting it on every sync would keep pushing the next
+                // nag further away. Otherwise start one now.
+                //
+                // Deliberately derived from fire_at rather than the server's
+                // "active" flag: the saved copy can predate the occurrence (e.g. a
+                // reboot before the next sync), and a stale `active: false` must not
+                // silence a reminder that is still unresolved.
+                if (alarmExists(context, key)) continue
+                nextMillis = now + nag * 1000L
+            } else {
+                // Past and not outstanding (e.g. a one-off already handled by the
+                // server's own reminder loop): nothing to arm.
+                continue
+            }
 
             arm(
                 context,
                 key = key,
-                fireAtMillis = fireAtMillis,
+                fireAtMillis = nextMillis,
+                occurrenceEpoch = occurrenceEpoch,
                 title = o.optString("title").ifBlank { "Workspace reminder" },
                 body = o.optString("body"),
                 itemId = o.optString("item_id").takeIf { it.isNotBlank() },
                 workspaceId = o.optString("workspace_id").takeIf { it.isNotBlank() },
                 kind = o.optString("kind").ifBlank { "task" },
                 subtaskId = if (o.isNull("subtask_id")) null else o.optString("subtask_id").takeIf { it.isNotBlank() },
-                nagSeconds = if (o.isNull("nag_seconds")) null else o.optInt("nag_seconds").takeIf { it > 0 },
-                nagCount = 0,
+                nagSeconds = nag,
             )
         }
     }
@@ -113,13 +146,16 @@ object ReminderScheduler {
     fun scheduleNextNag(context: Context, fired: Intent) {
         val key = fired.getStringExtra(EXTRA_KEY) ?: return
         val nagSeconds = fired.getIntExtra(EXTRA_NAG_SECONDS, -1)
-        val nagCount = fired.getIntExtra(EXTRA_NAG_COUNT, 0)
-        if (nagSeconds <= 0 || nagCount >= MAX_NAGS) return
+        if (nagSeconds <= 0) return
+
+        val occurrence = fired.getLongExtra(EXTRA_OCCURRENCE, 0L)
+        if (occurrence > 0 && System.currentTimeMillis() / 1000 - occurrence > MAX_NAG_AGE_SECONDS) return
 
         arm(
             context,
             key = key,
             fireAtMillis = System.currentTimeMillis() + nagSeconds * 1000L,
+            occurrenceEpoch = occurrence,
             title = fired.getStringExtra(EXTRA_TITLE) ?: "Workspace reminder",
             body = fired.getStringExtra(EXTRA_BODY) ?: "",
             itemId = fired.getStringExtra(EXTRA_ITEM_ID),
@@ -127,47 +163,22 @@ object ReminderScheduler {
             kind = fired.getStringExtra(EXTRA_KIND),
             subtaskId = fired.getStringExtra(EXTRA_SUBTASK_ID),
             nagSeconds = nagSeconds,
-            nagCount = nagCount + 1,
-        )
-
-        // Remember which alarm belongs to this notification, so swiping the
-        // notification away can cancel it even when the visible notification was
-        // posted by the FCM path (which only knows the item/subtask key, not the
-        // occurrence key this alarm is tracked by).
-        Prefs.setActiveAlarmKey(
-            context,
-            ReminderNotifications.keyFor(
-                fired.getStringExtra(EXTRA_ITEM_ID),
-                fired.getStringExtra(EXTRA_SUBTASK_ID),
-            ),
-            key,
         )
     }
 
-    /**
-     * Cancels an armed alarm. `key` may be either an occurrence key (from a local
-     * notification's delete intent) or an item/subtask notification key (from an
-     * FCM-posted one); in the latter case the nag alarm recorded for it is used.
-     */
+    /** Cancels an armed alarm by its occurrence key. */
     fun cancel(context: Context, key: String) {
-        if (cancelExact(context, key)) return
-        val active = Prefs.getActiveAlarmKey(context, key) ?: return
-        if (cancelExact(context, active)) Prefs.setActiveAlarmKey(context, key, null)
-    }
-
-    private fun cancelExact(context: Context, occurrenceKey: String): Boolean {
         val intent = Intent(context, ReminderAlarmReceiver::class.java).setAction(ACTION_REMINDER)
         // FLAG_NO_CREATE: if no matching alarm exists there is nothing to cancel,
         // and this must not leave a stray PendingIntent behind.
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            occurrenceKey.hashCode(),
+            key.hashCode(),
             intent,
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-        ) ?: return false
+        ) ?: return
         context.getSystemService(AlarmManager::class.java).cancel(pendingIntent)
         pendingIntent.cancel()
-        return true
     }
 
     private fun cancelAll(context: Context, json: String) {
@@ -182,10 +193,44 @@ object ReminderScheduler {
         }
     }
 
+    /** Cancels alarms from the previous saved copy that the new schedule no longer
+     *  contains (a completed/deleted task, or one whose reminder time changed). */
+    private fun cancelMissing(context: Context, oldJson: String, keep: Set<String>) {
+        val old = try {
+            JSONArray(oldJson)
+        } catch (e: Exception) {
+            return
+        }
+        for (i in 0 until old.length()) {
+            val key = old.optJSONObject(i)?.optString("key").orEmpty()
+            if (key.isNotBlank() && key !in keep) cancel(context, key)
+        }
+    }
+
+    private fun keysOf(entries: JSONArray): Set<String> {
+        val keys = HashSet<String>()
+        for (i in 0 until entries.length()) {
+            val key = entries.optJSONObject(i)?.optString("key").orEmpty()
+            if (key.isNotBlank()) keys.add(key)
+        }
+        return keys
+    }
+
+    private fun alarmExists(context: Context, key: String): Boolean {
+        val intent = Intent(context, ReminderAlarmReceiver::class.java).setAction(ACTION_REMINDER)
+        return PendingIntent.getBroadcast(
+            context,
+            key.hashCode(),
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        ) != null
+    }
+
     private fun arm(
         context: Context,
         key: String,
         fireAtMillis: Long,
+        occurrenceEpoch: Long,
         title: String,
         body: String,
         itemId: String?,
@@ -193,11 +238,11 @@ object ReminderScheduler {
         kind: String?,
         subtaskId: String?,
         nagSeconds: Int?,
-        nagCount: Int,
     ) {
         val intent = Intent(context, ReminderAlarmReceiver::class.java).apply {
             action = ACTION_REMINDER
             putExtra(EXTRA_KEY, key)
+            putExtra(EXTRA_OCCURRENCE, occurrenceEpoch)
             putExtra(EXTRA_TITLE, title)
             putExtra(EXTRA_BODY, body)
             itemId?.let { putExtra(EXTRA_ITEM_ID, it) }
@@ -205,7 +250,6 @@ object ReminderScheduler {
             kind?.let { putExtra(EXTRA_KIND, it) }
             subtaskId?.let { putExtra(EXTRA_SUBTASK_ID, it) }
             nagSeconds?.let { putExtra(EXTRA_NAG_SECONDS, it) }
-            putExtra(EXTRA_NAG_COUNT, nagCount)
         }
         val pendingIntent = PendingIntent.getBroadcast(
             context,

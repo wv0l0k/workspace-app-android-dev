@@ -61,20 +61,10 @@ object ReminderNotifications {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // A locally-scheduled reminder keeps re-arming itself while it's unresolved
-        // (see ReminderAlarmReceiver). Swiping the notification away should stop
-        // that, the same way marking the task done eventually does on the server.
-        val dismissIntent = Intent(context, ReminderDismissReceiver::class.java).apply {
-            action = ReminderScheduler.ACTION_DISMISS
-            putExtra(ReminderScheduler.EXTRA_KEY, key)
-        }
-        val dismissPendingIntent = PendingIntent.getBroadcast(
-            context,
-            notificationId,
-            dismissIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
+        // Deliberately no deleteIntent: swiping a reminder away must NOT stop it
+        // nagging. Nags end only when the task/step is marked complete, at which
+        // point the server schedule no longer contains it and the next sync cancels
+        // its alarm (see ReminderScheduler.saveAndSchedule).
         val notificationManager = context.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(CHANNEL_ID, "Reminders", NotificationManager.IMPORTANCE_HIGH)
@@ -90,7 +80,6 @@ object ReminderNotifications {
             .setSmallIcon(R.drawable.ic_stat_workspace)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
-            .setDeleteIntent(dismissPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .build()

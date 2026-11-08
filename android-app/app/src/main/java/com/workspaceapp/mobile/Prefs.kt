@@ -17,7 +17,7 @@ object Prefs {
     private const val KEY_PENDING_LOGIN_TOKEN = "pending_login_token"
     private const val KEY_REMINDER_SCHEDULE = "reminder_schedule"
     private const val KEY_LAST_NOTIFIED_PREFIX = "last_notified_"
-    private const val KEY_ACTIVE_ALARM_PREFIX = "active_alarm_"
+    private const val KEY_LOCAL_OCCURRENCE_PREFIX = "local_occurrence_"
     private const val KEY_EXACT_ALARM_ASKED = "exact_alarm_asked"
 
     fun getServerUrl(context: Context): String? =
@@ -69,21 +69,19 @@ object Prefs {
     }
 
     /**
-     * The occurrence key of the nag alarm currently armed for an item/subtask
-     * notification key. Lets a notification posted by the FCM path (which doesn't
-     * know the occurrence key) still cancel the matching local alarm when swiped.
+     * The latest occurrence time (epoch seconds) that this item/step's local alarm
+     * has already handled. FCM uses it to discard a push for an occurrence the phone
+     * already showed - e.g. a message queued while offline and delivered on
+     * reconnect. A genuinely later occurrence has a larger timestamp and is shown.
      */
-    fun getActiveAlarmKey(context: Context, notificationKey: String): String? =
+    fun getLastLocalOccurrence(context: Context, notificationKey: String): Long =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getString(KEY_ACTIVE_ALARM_PREFIX + notificationKey, null)
+            .getLong(KEY_LOCAL_OCCURRENCE_PREFIX + notificationKey, 0L)
 
-    fun setActiveAlarmKey(context: Context, notificationKey: String, occurrenceKey: String?) {
+    fun setLastLocalOccurrence(context: Context, notificationKey: String, occurrenceEpoch: Long) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (occurrenceKey == null) {
-            prefs.edit().remove(KEY_ACTIVE_ALARM_PREFIX + notificationKey).apply()
-        } else {
-            prefs.edit().putString(KEY_ACTIVE_ALARM_PREFIX + notificationKey, occurrenceKey).apply()
-        }
+        if (occurrenceEpoch <= getLastLocalOccurrence(context, notificationKey)) return
+        prefs.edit().putLong(KEY_LOCAL_OCCURRENCE_PREFIX + notificationKey, occurrenceEpoch).apply()
     }
 
     /**
