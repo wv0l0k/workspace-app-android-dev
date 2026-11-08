@@ -32,9 +32,30 @@ class WebAppInterface(private val activity: MainActivity) {
     @JavascriptInterface
     fun getPendingLoginToken(): String = Prefs.consumePendingLoginToken(activity) ?: ""
 
+    /**
+     * The frontend hands over the latest reminder schedule (JSON, from
+     * GET /api/reminders/schedule) after boot and after anything changes. The
+     * native side stores it and re-arms AlarmManager alarms, which is what lets
+     * reminders fire later with no network at all. Called from a background
+     * thread, which is fine - see ReminderScheduler.
+     */
+    @JavascriptInterface
+    fun setReminderSchedule(json: String) {
+        try {
+            ReminderScheduler.saveAndSchedule(activity, json)
+        } catch (e: Exception) {
+            // A malformed payload must never take down the WebView bridge; the
+            // previous schedule (if any) simply stays armed.
+            android.util.Log.w("ReminderScheduler", "Could not apply reminder schedule", e)
+        }
+    }
+
     @JavascriptInterface
     fun resetApp() {
         Handler(Looper.getMainLooper()).post {
+            // Cancel armed alarms before wiping storage, or a disconnected server's
+            // reminders would keep firing after the account is gone.
+            ReminderScheduler.clearAll(activity)
             Prefs.clearAll(activity)
             activity.startActivity(Intent(activity, SettingsActivity::class.java))
             activity.finish()

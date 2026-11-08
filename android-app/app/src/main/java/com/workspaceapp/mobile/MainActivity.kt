@@ -3,6 +3,7 @@ package com.workspaceapp.mobile
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlarmManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -10,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.View
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -110,6 +112,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         requestNotificationPermissionIfNeeded()
+        requestExactAlarmPermissionIfNeeded()
 
         setContentView(R.layout.activity_main)
         val root = findViewById<FrameLayout>(R.id.mainRoot)
@@ -257,6 +260,10 @@ class MainActivity : AppCompatActivity() {
         // Covers the case where onNewToken fired while this Activity wasn't
         // running - pick up whatever's waiting in Prefs every time we come back.
         tryRegisterPushToken()
+        // Re-arm local reminders. Mostly a no-op (same alarms replaced in place),
+        // but it covers the case where exact-alarm permission was only granted
+        // while the app was away, and OEMs that don't deliver BOOT_COMPLETED.
+        ReminderScheduler.rescheduleSaved(this)
     }
 
     /** Opens straight to a specific item if we were launched from a notification tap. */
@@ -352,6 +359,31 @@ class MainActivity : AppCompatActivity() {
             PackageManager.PERMISSION_GRANTED
         if (!granted) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+    }
+
+    /**
+     * Android 12+ requires the user to allow exact alarms before a reminder can be
+     * guaranteed to fire at its set time (without it, the OS may delay/batch it).
+     * Shown once; the system permission page is the only place it can be granted.
+     * Reminders still work without it, just less punctually - see ReminderScheduler.
+     */
+    private fun requestExactAlarmPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val alarmManager = getSystemService(AlarmManager::class.java)
+        if (alarmManager.canScheduleExactAlarms()) return
+        if (Prefs.wasExactAlarmAsked(this)) return
+        Prefs.setExactAlarmAsked(this)
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        } catch (e: Exception) {
+            // Some OEM builds don't expose this settings screen - inexact alarms
+            // (still enabled in ReminderScheduler) remain the fallback.
         }
     }
 

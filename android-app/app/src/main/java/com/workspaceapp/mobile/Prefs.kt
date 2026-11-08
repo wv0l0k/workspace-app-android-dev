@@ -15,6 +15,10 @@ object Prefs {
     private const val KEY_SERVER_URL = "server_url"
     private const val KEY_FCM_TOKEN = "fcm_token"
     private const val KEY_PENDING_LOGIN_TOKEN = "pending_login_token"
+    private const val KEY_REMINDER_SCHEDULE = "reminder_schedule"
+    private const val KEY_LAST_NOTIFIED_PREFIX = "last_notified_"
+    private const val KEY_ACTIVE_ALARM_PREFIX = "active_alarm_"
+    private const val KEY_EXACT_ALARM_ASKED = "exact_alarm_asked"
 
     fun getServerUrl(context: Context): String? =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_SERVER_URL, null)
@@ -49,6 +53,60 @@ object Prefs {
         val token = prefs.getString(KEY_PENDING_LOGIN_TOKEN, null)
         if (token != null) prefs.edit().remove(KEY_PENDING_LOGIN_TOKEN).apply()
         return token
+    }
+
+    /**
+     * The phone's copy of the reminder schedule produced by
+     * GET /api/reminders/schedule (see ReminderScheduler). Stored as the raw JSON
+     * array; the native side never needs to know how it was built.
+     */
+    fun getReminderSchedule(context: Context): String? =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_REMINDER_SCHEDULE, null)
+
+    fun setReminderSchedule(context: Context, json: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putString(KEY_REMINDER_SCHEDULE, json).apply()
+    }
+
+    /**
+     * The occurrence key of the nag alarm currently armed for an item/subtask
+     * notification key. Lets a notification posted by the FCM path (which doesn't
+     * know the occurrence key) still cancel the matching local alarm when swiped.
+     */
+    fun getActiveAlarmKey(context: Context, notificationKey: String): String? =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_ACTIVE_ALARM_PREFIX + notificationKey, null)
+
+    fun setActiveAlarmKey(context: Context, notificationKey: String, occurrenceKey: String?) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (occurrenceKey == null) {
+            prefs.edit().remove(KEY_ACTIVE_ALARM_PREFIX + notificationKey).apply()
+        } else {
+            prefs.edit().putString(KEY_ACTIVE_ALARM_PREFIX + notificationKey, occurrenceKey).apply()
+        }
+    }
+
+    /**
+     * When a reminder for this key last became a visible notification, from either
+     * the FCM path or a local alarm. Used only to suppress the duplicate that the
+     * other path would otherwise post moments later for the same occurrence.
+     */
+    fun getLastNotified(context: Context, key: String): Long =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getLong(KEY_LAST_NOTIFIED_PREFIX + key, 0L)
+
+    fun setLastNotified(context: Context, key: String, atMillis: Long) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putLong(KEY_LAST_NOTIFIED_PREFIX + key, atMillis).apply()
+    }
+
+    /** Whether the Android 12+ exact-alarm settings screen has already been shown. */
+    fun wasExactAlarmAsked(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_EXACT_ALARM_ASKED, false)
+
+    fun setExactAlarmAsked(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_EXACT_ALARM_ASKED, true).apply()
     }
 
     /** "Disconnect from server" (the mobile Logout button): wipes everything

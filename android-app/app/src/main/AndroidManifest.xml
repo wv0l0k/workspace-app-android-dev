@@ -5,6 +5,12 @@
     <!-- Required at runtime on Android 13+ for notifications to show at all;
          requested in MainActivity, this just declares the app may ask. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Locally-scheduled reminders: on Android 12+ this must be granted by the
+         user (MainActivity opens the system screen once) for an alarm to fire at
+         its exact time; without it, reminders are still armed but may be delayed.
+         RECEIVE_BOOT_COMPLETED re-arms the saved schedule after a restart. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
@@ -42,6 +48,28 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!-- Offline reminder path: AlarmManager -> notification. Explicit intents
+             from this app only, so neither receiver needs to be exported. -->
+        <receiver
+            android:name=".ReminderAlarmReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".ReminderDismissReceiver"
+            android:exported="false" />
+
+        <!-- Alarms are cleared by a reboot, so re-arm the saved schedule on boot
+             (and after an app update). BOOT_COMPLETED is a protected system
+             broadcast, which is why this one does need to be exported. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>
