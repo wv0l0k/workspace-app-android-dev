@@ -55,6 +55,12 @@
             android:name=".ReminderAlarmReceiver"
             android:exported="false" />
 
+        <!-- Notification action buttons (Complete/Snooze). Only this app's own
+             notification PendingIntents target it. -->
+        <receiver
+            android:name=".ReminderActionReceiver"
+            android:exported="false" />
+
         <!-- Alarms are cleared by a reboot, so re-arm the saved schedule on boot
              (and after an app update). BOOT_COMPLETED is a protected system
              broadcast, which is why this one does need to be exported. -->

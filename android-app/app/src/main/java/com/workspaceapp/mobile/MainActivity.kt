@@ -4,7 +4,10 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlarmManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -55,6 +58,15 @@ class MainActivity : AppCompatActivity() {
     private val httpClient = OkHttpClient()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var navigationTimeoutRunnable: Runnable? = null
+
+    // A completion tapped on a notification is queued natively so it works offline.
+    // When the app is already open, the receiver tells us and this flushes it
+    // immediately instead of waiting for the next resume/online event.
+    private val reminderActionsReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            flushPendingReminderActions()
+        }
+    }
 
     // How long to wait for a navigation to actually finish (onPageFinished) or fail
     // outright (onReceivedError) before giving up on it ourselves. Set well above
@@ -255,6 +267,25 @@ class MainActivity : AppCompatActivity() {
         loadDeepLinkOrHome(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        ContextCompat.registerReceiver(
+            this,
+            reminderActionsReceiver,
+            IntentFilter(ReminderActionReceiver.ACTION_FLUSH_ACTIONS),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    override fun onStop() {
+        try {
+            unregisterReceiver(reminderActionsReceiver)
+        } catch (e: IllegalArgumentException) {
+            // Not registered (e.g. onStart returned early during setup) - nothing to do.
+        }
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         // Covers the case where onNewToken fired while this Activity wasn't
@@ -264,6 +295,17 @@ class MainActivity : AppCompatActivity() {
         // but it covers the case where exact-alarm permission was only granted
         // while the app was away, and OEMs that don't deliver BOOT_COMPLETED.
         ReminderScheduler.rescheduleSaved(this)
+        // A notification action taken while the app was in the background is still
+        // queued natively; send it now that the page can use its auth token.
+        flushPendingReminderActions()
+    }
+
+    private fun flushPendingReminderActions() {
+        if (!::webView.isInitialized) return
+        webView.evaluateJavascript(
+            "(function(){ if (typeof window.flushNativeReminderActions === 'function') { window.flushNativeReminderActions(); } })()",
+            null
+        )
     }
 
     /** Opens straight to a specific item if we were launched from a notification tap. */

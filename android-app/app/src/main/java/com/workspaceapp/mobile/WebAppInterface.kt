@@ -50,6 +50,24 @@ class WebAppInterface(private val activity: MainActivity) {
         }
     }
 
+    /**
+     * Drains completions taken from notification actions. The frontend owns the
+     * auth token, so it - not this native side - performs the PATCH. Atomically
+     * emptied here so two flushes can't send the same action twice; anything that
+     * fails is put back with restorePendingReminderActions().
+     */
+    @JavascriptInterface
+    fun takePendingReminderActions(): String = Prefs.takePendingReminderActions(activity)
+
+    @JavascriptInterface
+    fun restorePendingReminderActions(json: String) {
+        try {
+            Prefs.restorePendingReminderActions(activity, json)
+        } catch (e: Exception) {
+            android.util.Log.w("ReminderActions", "Could not restore pending reminder actions", e)
+        }
+    }
+
     @JavascriptInterface
     fun resetApp() {
         Handler(Looper.getMainLooper()).post {

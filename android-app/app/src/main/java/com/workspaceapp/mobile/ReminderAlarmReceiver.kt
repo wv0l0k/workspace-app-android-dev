@@ -16,17 +16,40 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         // itself is tracked/cancelled by. Notifications, though, must use the same
         // item/subtask identity as the FCM path, or the two paths would stack as
         // separate notifications instead of updating one.
-        if (intent.getStringExtra(ReminderScheduler.EXTRA_KEY) == null) return
+        val alarmKey = intent.getStringExtra(ReminderScheduler.EXTRA_KEY) ?: return
         val title = intent.getStringExtra(ReminderScheduler.EXTRA_TITLE) ?: "Workspace reminder"
         val body = intent.getStringExtra(ReminderScheduler.EXTRA_BODY) ?: ""
         val itemId = intent.getStringExtra(ReminderScheduler.EXTRA_ITEM_ID)
         val subtaskId = intent.getStringExtra(ReminderScheduler.EXTRA_SUBTASK_ID)
         val notificationKey = ReminderNotifications.keyFor(itemId, subtaskId)
+        val occurrence = intent.getLongExtra(ReminderScheduler.EXTRA_OCCURRENCE, 0L)
+        val now = System.currentTimeMillis()
+
+        // Completed from a notification (possibly while offline, so the synced
+        // schedule still contains this occurrence): stay silent and drop the chain.
+        if (Prefs.isLocallyCompleted(context, notificationKey, occurrence)) {
+            ReminderScheduler.cancel(context, alarmKey)
+            ReminderNotifications.cancel(context, notificationKey)
+            return
+        }
+
+        // A snooze is still in effect. Normally the snooze replaced this alarm, but
+        // one already dispatched just before the tap can still land here - and it
+        // must not cut the snooze short or alert early. At the end of the snooze the
+        // alarm becomes the one that resumes the chain.
+        val snooze = Prefs.getSnooze(context, notificationKey)
+        if (occurrence > 0 && snooze.occurrenceEpoch == occurrence) {
+            if (snooze.untilMillis > now) {
+                // Delivered early - put the alarm back at the snooze's real end.
+                ReminderScheduler.scheduleNextNag(context, intent)
+                return
+            }
+            if (snooze.untilMillis > 0) Prefs.expireSnooze(context, notificationKey)
+        }
 
         // The FCM push for the same occurrence may have arrived first (when online,
         // both paths are active). Same key, same notification id, but without this
         // guard the second one would still re-alert/sound. Whichever is first wins.
-        val now = System.currentTimeMillis()
         if (now - Prefs.getLastNotified(context, notificationKey) >= ReminderNotifications.DEDUPE_WINDOW_MS) {
             ReminderNotifications.show(
                 context,
@@ -37,6 +60,8 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
                 workspaceId = intent.getStringExtra(ReminderScheduler.EXTRA_WORKSPACE_ID),
                 kind = intent.getStringExtra(ReminderScheduler.EXTRA_KIND),
                 subtaskId = subtaskId,
+                occurrenceEpoch = occurrence,
+                nagSeconds = intent.getIntExtra(ReminderScheduler.EXTRA_NAG_SECONDS, -1).takeIf { it > 0 },
             )
             Prefs.setLastNotified(context, notificationKey, now)
         }
@@ -46,7 +71,6 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         // now on, any FCM delivery for this same occurrence is a duplicate: most
         // importantly a push FCM queued while the phone was offline and delivers on
         // reconnect, which used to alert a second time.
-        val occurrence = intent.getLongExtra(ReminderScheduler.EXTRA_OCCURRENCE, 0L)
         if (occurrence > 0) {
             Prefs.setLastLocalOccurrence(context, notificationKey, occurrence)
         }

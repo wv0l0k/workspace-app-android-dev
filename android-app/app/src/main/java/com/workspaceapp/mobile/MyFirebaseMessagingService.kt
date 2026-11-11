@@ -48,10 +48,20 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val fireAt = message.data["fire_at"]?.toLongOrNull() ?: 0L
         if (fireAt > 0 && Prefs.getLastLocalOccurrence(this, key) >= fireAt) return
 
+        // Completed from a notification (the server PATCH may still be queued), or
+        // snoozed from one: stay silent, exactly like the local path.
+        if (Prefs.isLocallyCompleted(this, key, fireAt)) return
+        val now = System.currentTimeMillis()
+        val snooze = Prefs.getSnooze(this, key)
+        if (snooze.untilMillis > now && (fireAt <= 0 || snooze.occurrenceEpoch == fireAt)) return
+        if (fireAt > 0 && snooze.occurrenceEpoch == fireAt && snooze.untilMillis > 0 && snooze.untilMillis <= now) {
+            // The snooze has elapsed; this is the delivery that resumes the reminder.
+            Prefs.expireSnooze(this, key)
+        }
+
         // If a local alarm for this same occurrence just fired (or is about to),
         // don't alert twice. Both paths use the same notification id, so an update
         // would still land in the right place; this just suppresses the second sound.
-        val now = System.currentTimeMillis()
         if (now - Prefs.getLastNotified(this, key) < ReminderNotifications.DEDUPE_WINDOW_MS) return
         Prefs.setLastNotified(this, key, now)
 
@@ -64,6 +74,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             workspaceId = workspaceId,
             kind = kind,
             subtaskId = subtaskId,
+            occurrenceEpoch = fireAt,
+            nagSeconds = message.data["nag_seconds"]?.toIntOrNull()?.takeIf { it > 0 },
         )
     }
 }

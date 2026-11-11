@@ -19,6 +19,11 @@ import androidx.core.app.NotificationCompat
  * occurrence around the same time they update one notification instead of
  * stacking or sounding twice. Whichever arrives first wins; the other is
  * suppressed for a short window.
+ *
+ * Both paths also expose the same two actions (see ReminderActionReceiver):
+ * "Complete", which records the completion on-device immediately and queues the
+ * server update for the next time the app is online, and "Snooze", which is
+ * local-only and limited to ReminderScheduler.MAX_SNOOZES per occurrence.
  */
 object ReminderNotifications {
 
@@ -45,6 +50,8 @@ object ReminderNotifications {
         workspaceId: String?,
         kind: String?,
         subtaskId: String?,
+        occurrenceEpoch: Long = 0L,
+        nagSeconds: Int? = null,
     ) {
         val notificationId = key.hashCode()
 
@@ -71,7 +78,7 @@ object ReminderNotifications {
             notificationManager.createNotificationChannel(channel)
         }
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(body)
             // Collapsed, a notification only ever shows one line of body text - this
@@ -82,8 +89,102 @@ object ReminderNotifications {
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .build()
 
-        notificationManager.notify(notificationId, notification)
+        builder.addAction(
+            R.drawable.ic_action_complete,
+            "Complete",
+            actionIntent(
+                context,
+                ReminderActionReceiver.ACTION_COMPLETE,
+                notificationId,
+                key,
+                occurrenceEpoch,
+                title,
+                body,
+                itemId,
+                workspaceId,
+                kind,
+                subtaskId,
+                nagSeconds,
+            )
+        )
+
+        // Once this occurrence's snooze allowance is used up, don't offer an action
+        // that could only fail - Complete is the remaining way to stop the nags.
+        if (snoozesRemaining(context, key, occurrenceEpoch) > 0) {
+            builder.addAction(
+                R.drawable.ic_action_snooze,
+                "Snooze",
+                actionIntent(
+                    context,
+                    ReminderActionReceiver.ACTION_SNOOZE,
+                    notificationId,
+                    key,
+                    occurrenceEpoch,
+                    title,
+                    body,
+                    itemId,
+                    workspaceId,
+                    kind,
+                    subtaskId,
+                    nagSeconds,
+                )
+            )
+        }
+
+        notificationManager.notify(notificationId, builder.build())
+    }
+
+    fun cancel(context: Context, key: String) {
+        context.getSystemService(NotificationManager::class.java).cancel(key.hashCode())
+    }
+
+    private fun snoozesRemaining(context: Context, key: String, occurrenceEpoch: Long): Int {
+        val state = Prefs.getSnooze(context, key)
+        val used = if (occurrenceEpoch > 0 && state.occurrenceEpoch == occurrenceEpoch) state.count else 0
+        return (ReminderScheduler.MAX_SNOOZES - used).coerceAtLeast(0)
+    }
+
+    /**
+     * An action PendingIntent carries everything the receiver needs to either queue
+     * a completion or re-arm the same local alarm chain for a snooze. The occurrence
+     * key matches ReminderScheduler's own, so a snooze replaces the currently-armed
+     * nag rather than creating a parallel one.
+     */
+    private fun actionIntent(
+        context: Context,
+        action: String,
+        notificationId: Int,
+        key: String,
+        occurrenceEpoch: Long,
+        title: String,
+        body: String,
+        itemId: String?,
+        workspaceId: String?,
+        kind: String?,
+        subtaskId: String?,
+        nagSeconds: Int?,
+    ): PendingIntent {
+        val intent = Intent(context, ReminderActionReceiver::class.java).apply {
+            this.action = action
+            putExtra(ReminderScheduler.EXTRA_KEY, ReminderScheduler.occurrenceKey(itemId, subtaskId, occurrenceEpoch))
+            putExtra(ReminderScheduler.EXTRA_OCCURRENCE, occurrenceEpoch)
+            putExtra(ReminderScheduler.EXTRA_TITLE, title)
+            putExtra(ReminderScheduler.EXTRA_BODY, body)
+            itemId?.let { putExtra(ReminderScheduler.EXTRA_ITEM_ID, it) }
+            workspaceId?.let { putExtra(ReminderScheduler.EXTRA_WORKSPACE_ID, it) }
+            kind?.let { putExtra(ReminderScheduler.EXTRA_KIND, it) }
+            subtaskId?.let { putExtra(ReminderScheduler.EXTRA_SUBTASK_ID, it) }
+            nagSeconds?.takeIf { it > 0 }?.let { putExtra(ReminderScheduler.EXTRA_NAG_SECONDS, it) }
+        }
+        // Distinct request codes for the two actions, derived from the notification
+        // id so the same notification's actions update in place on re-post.
+        val requestCode = notificationId * 2 + if (action == ReminderActionReceiver.ACTION_COMPLETE) 0 else 1
+        return PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 }
