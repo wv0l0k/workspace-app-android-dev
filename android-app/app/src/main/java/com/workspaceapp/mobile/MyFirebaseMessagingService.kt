@@ -34,12 +34,20 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         // This is what makes a task edited on another device reach a closed app.
         if (message.data["type"] == "sync") {
             ReminderSyncWorker.refreshSoon(this)
+            // Also a good moment to retry a completion queued from a notification
+            // while the phone had no connection.
+            ReminderActionSyncWorker.syncSoon(this)
             return
         }
 
+        val itemId = message.data["item_id"]
+        // No title *and* no item id means this isn't a reminder at all - it's a
+        // control message this build doesn't know (a newer silent ping type, say).
+        // Showing it would just produce an empty notification titled "Workspace".
+        if (message.data["title"].isNullOrBlank() && itemId.isNullOrBlank()) return
+
         val title = message.data["title"] ?: getString(R.string.app_name)
         val body = message.data["body"] ?: ""
-        val itemId = message.data["item_id"]
         val workspaceId = message.data["workspace_id"]
         val kind = message.data["kind"]
         val subtaskId = message.data["subtask_id"]

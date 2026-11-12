@@ -10,8 +10,10 @@ import android.widget.Toast
  * on-device, so both work with no connection:
  *
  *  - Complete records the task/step as completed locally (which silences both
- *    delivery paths immediately) and queues the server update for the frontend to
- *    send whenever it is next online.
+ *    delivery paths immediately) and queues the server update. The background
+ *    worker (ReminderActionSyncWorker) sends it as soon as a connection exists -
+ *    the app does not need to be opened - and the frontend also flushes the queue
+ *    when it is running.
  *  - Snooze is device-only and never touches the server: it postpones this
  *    occurrence by ReminderScheduler.SNOOZE_MILLIS, at most
  *    ReminderScheduler.MAX_SNOOZES times.
@@ -59,10 +61,13 @@ class ReminderActionReceiver : BroadcastReceiver() {
             ?.let { ReminderScheduler.cancel(context, it) }
         ReminderNotifications.cancel(context, notificationKey)
 
-        // Only a real item can be completed server-side. Queue the PATCH for the
-        // frontend (which holds the auth token); it retries until it gets through.
+        // Only a real item can be completed server-side. Queue the PATCH, then send
+        // it two ways: the background worker (works with the app closed, and waits
+        // for a connection if there isn't one) and, if the app happens to be open,
+        // the page's own immediate flush.
         if (!itemId.isNullOrBlank()) {
             Prefs.addPendingReminderAction(context, "complete", itemId, subtaskId, workspaceId, occurrence)
+            ReminderActionSyncWorker.syncSoon(context)
             context.sendBroadcast(Intent(ACTION_FLUSH_ACTIONS).setPackage(context.packageName))
         }
     }

@@ -43,6 +43,10 @@ class ReminderSyncWorker(appContext: Context, params: WorkerParameters) :
 
     override fun doWork(): Result {
         val context = applicationContext
+        // Piggyback on this run as a safety net for notification completions that
+        // could not be sent earlier (e.g. the server was down through all of the
+        // action worker's retries). No-op when nothing is queued.
+        ReminderActionSyncWorker.syncSoon(context)
         val token = Prefs.getAuthToken(context) ?: return Result.success()
         val serverUrl = Prefs.getServerUrl(context) ?: return Result.success()
 

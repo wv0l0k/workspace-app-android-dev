@@ -21,6 +21,9 @@ class BootReceiver : BroadcastReceiver() {
                 // connection (no-op when nobody is signed in).
                 ReminderSyncWorker.ensurePeriodic(context)
                 ReminderSyncWorker.refreshSoon(context)
+                // A Complete tapped just before the phone restarted may still be
+                // queued; send it now that there may be a connection again.
+                ReminderActionSyncWorker.syncSoon(context)
             }
         }
     }

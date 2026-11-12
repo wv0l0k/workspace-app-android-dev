@@ -293,8 +293,9 @@ object Prefs {
     // ---------- Notification actions: queued server updates ----------
     //
     // Completing from a notification works offline, so the server PATCH is deferred.
-    // The receiver appends an action here; the frontend (which owns the auth token)
-    // drains the queue over the JS bridge the next time it is online.
+    // The receiver appends an action here. ReminderActionSyncWorker (background,
+    // app closed) and the frontend (when it is running) both drain this queue; the
+    // take below is atomic, so only one of them can ever send a given action.
 
     @Synchronized
     fun getPendingReminderActions(context: Context): String =

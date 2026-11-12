@@ -51,8 +51,9 @@ class WebAppInterface(private val activity: MainActivity) {
     }
 
     /**
-     * Drains completions taken from notification actions. The frontend owns the
-     * auth token, so it - not this native side - performs the PATCH. Atomically
+     * Drains completions taken from notification actions. The page performs the
+     * PATCH itself (it has the session and the item in memory); ReminderActionSyncWorker
+     * drains the same queue in the background when the app is closed. Atomically
      * emptied here so two flushes can't send the same action twice; anything that
      * fails is put back with restorePendingReminderActions().
      */
@@ -79,10 +80,14 @@ class WebAppInterface(private val activity: MainActivity) {
         if (token.isBlank()) {
             Prefs.clearAuthToken(activity)
             ReminderSyncWorker.cancel(activity)
+            ReminderActionSyncWorker.cancel(activity)
             return
         }
         Prefs.setAuthToken(activity, token)
         ReminderSyncWorker.ensurePeriodic(activity)
+        // A token arriving is exactly when a completion queued while offline can
+        // finally be sent.
+        ReminderActionSyncWorker.syncSoon(activity)
     }
 
     @JavascriptInterface
@@ -92,6 +97,7 @@ class WebAppInterface(private val activity: MainActivity) {
             // a disconnected server's reminders would keep firing / being re-armed
             // after the account is gone.
             ReminderSyncWorker.cancel(activity)
+            ReminderActionSyncWorker.cancel(activity)
             ReminderScheduler.clearAll(activity)
             Prefs.clearAll(activity)
             activity.startActivity(Intent(activity, SettingsActivity::class.java))

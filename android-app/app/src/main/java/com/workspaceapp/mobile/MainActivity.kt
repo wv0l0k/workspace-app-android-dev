@@ -300,7 +300,9 @@ class MainActivity : AppCompatActivity() {
         // while the app was away, and OEMs that don't deliver BOOT_COMPLETED.
         ReminderScheduler.rescheduleSaved(this)
         // A notification action taken while the app was in the background is still
-        // queued natively; send it now that the page can use its auth token.
+        // queued natively; send it now that the page can use its auth token. The
+        // worker also does this without the page, so this is just the fast path.
+        ReminderActionSyncWorker.syncSoon(this)
         flushPendingReminderActions()
     }
 
@@ -370,12 +372,17 @@ class MainActivity : AppCompatActivity() {
             // when the page hasn't called setSessionToken yet (e.g. just updated).
             Prefs.setAuthToken(this, authToken)
             ReminderSyncWorker.ensurePeriodic(this)
+            ReminderActionSyncWorker.syncSoon(this)
             sendTokenToServer(serverUrl, authToken, fcmToken)
         }
     }
 
     private fun sendTokenToServer(serverUrl: String, authToken: String, fcmToken: String) {
-        val json = JSONObject().put("token", fcmToken).toString()
+        // sync_capable tells the server this build understands the silent
+        // {"type": "sync"} schedule-refresh ping. Older builds don't send it, so the
+        // server keeps pinging only phones that won't render the ping as an empty
+        // notification. See send_push(silent=True) in main.py.
+        val json = JSONObject().put("token", fcmToken).put("sync_capable", true).toString()
         val body = json.toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url("$serverUrl/api/push/register")
