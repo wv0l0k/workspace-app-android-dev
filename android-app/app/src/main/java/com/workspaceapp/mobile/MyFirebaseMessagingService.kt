@@ -29,6 +29,14 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
 
+        // A silent "the reminder schedule changed" ping (see request_sync_ping() in
+        // main.py): refresh the local schedule in the background and show nothing.
+        // This is what makes a task edited on another device reach a closed app.
+        if (message.data["type"] == "sync") {
+            ReminderSyncWorker.refreshSoon(this)
+            return
+        }
+
         val title = message.data["title"] ?: getString(R.string.app_name)
         val body = message.data["body"] ?: ""
         val itemId = message.data["item_id"]

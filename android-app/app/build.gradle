@@ -15,8 +15,8 @@ android {
         // fallback images - a personal, always-updated phone easily clears this.
         minSdk 26
         targetSdk 34
-        versionCode 11
-        versionName "2.0"
+        versionCode 12
+        versionName "2.1"
     }
 
     buildTypes {
@@ -46,6 +46,10 @@ dependencies {
 
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
+
+    // Background refresh of the local reminder schedule (ReminderSyncWorker) while
+    // the app is closed. Non-KTX on purpose, like Firebase above.
+    implementation 'androidx.work:work-runtime:2.9.1'
 
     // Just for the one small POST to /api/push/register - not otherwise needed.
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'

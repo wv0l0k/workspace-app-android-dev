@@ -68,11 +68,30 @@ class WebAppInterface(private val activity: MainActivity) {
         }
     }
 
+    /**
+     * Mirrors the page's current session token into native storage. The background
+     * refresh (ReminderSyncWorker) runs with no WebView, so it cannot read
+     * localStorage - this is how it authenticates. An empty token means the page
+     * logged out or its session ended, so the background work stops too.
+     */
+    @JavascriptInterface
+    fun setSessionToken(token: String) {
+        if (token.isBlank()) {
+            Prefs.clearAuthToken(activity)
+            ReminderSyncWorker.cancel(activity)
+            return
+        }
+        Prefs.setAuthToken(activity, token)
+        ReminderSyncWorker.ensurePeriodic(activity)
+    }
+
     @JavascriptInterface
     fun resetApp() {
         Handler(Looper.getMainLooper()).post {
-            // Cancel armed alarms before wiping storage, or a disconnected server's
-            // reminders would keep firing after the account is gone.
+            // Cancel armed alarms and background refreshes before wiping storage, or
+            // a disconnected server's reminders would keep firing / being re-armed
+            // after the account is gone.
+            ReminderSyncWorker.cancel(activity)
             ReminderScheduler.clearAll(activity)
             Prefs.clearAll(activity)
             activity.startActivity(Intent(activity, SettingsActivity::class.java))

@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- WorkManager's background reminder refresh is constrained to "has a
+         network", which it checks with this. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Required at runtime on Android 13+ for notifications to show at all;
          requested in MainActivity, this just declares the app may ask. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

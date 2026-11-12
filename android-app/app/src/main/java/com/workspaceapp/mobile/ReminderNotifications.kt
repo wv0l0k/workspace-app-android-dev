@@ -29,6 +29,16 @@ object ReminderNotifications {
 
     const val CHANNEL_ID = "reminders"
 
+    /** A second, deliberately quiet channel: the "you'll be reminded again in N
+     *  minutes" confirmation shown after a snooze is status feedback, not another
+     *  reminder, and must not buzz or make the reminder sound again. */
+    const val CHANNEL_ID_SNOOZE = "reminder_snoozed"
+    const val SNOOZE_CONFIRM_TIMEOUT_MS = 3_000L
+
+    /** Fixed id so a second snooze replaces the previous confirmation instead of
+     *  stacking them; deliberately unrelated to any reminder's own id. */
+    private const val SNOOZE_CONFIRM_ID = 0x5E0021
+
     /** How close two notifications for the same key have to be to count as the
      *  same occurrence. Long enough to cover FCM/local delivery skew, short
      *  enough that a genuine 1-minute nag still alerts on its next round. */
@@ -137,6 +147,47 @@ object ReminderNotifications {
 
     fun cancel(context: Context, key: String) {
         context.getSystemService(NotificationManager::class.java).cancel(key.hashCode())
+    }
+
+    /**
+     * A short-lived confirmation after Snooze: tells the person the reminder will
+     * come back rather than looking like it simply vanished, then removes itself
+     * after a few seconds (setTimeoutAfter) so it doesn't linger in the shade.
+     *
+     * Uses its own low-importance channel so it stays silent - the reminder sound
+     * belongs to the reminder, not to this receipt. No actions and no content
+     * intent: there is nothing to do with it.
+     */
+    fun showSnoozed(context: Context, title: String?, minutes: Int) {
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID_SNOOZE,
+                "Snooze confirmations",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val unit = if (minutes == 1) "minute" else "minutes"
+        val text = if (title.isNullOrBlank()) {
+            "We'll remind you again in $minutes $unit."
+        } else {
+            "\"$title\" will remind you again in $minutes $unit."
+        }
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_SNOOZE)
+            .setContentTitle("Snoozed")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setSmallIcon(R.drawable.ic_stat_workspace)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(true)
+            .setTimeoutAfter(SNOOZE_CONFIRM_TIMEOUT_MS)
+            .build()
+        notificationManager.notify(SNOOZE_CONFIRM_ID, notification)
     }
 
     private fun snoozesRemaining(context: Context, key: String, occurrenceEpoch: Long): Int {

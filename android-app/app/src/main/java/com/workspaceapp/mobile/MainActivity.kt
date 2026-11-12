@@ -125,6 +125,10 @@ class MainActivity : AppCompatActivity() {
 
         requestNotificationPermissionIfNeeded()
         requestExactAlarmPermissionIfNeeded()
+        // Restore the periodic background refresh if it was lost (an upgrade from a
+        // build without it, or Android pruning the work). A no-op until the page has
+        // mirrored a session token.
+        ReminderSyncWorker.ensurePeriodic(this)
 
         setContentView(R.layout.activity_main)
         val root = findViewById<FrameLayout>(R.id.mainRoot)
@@ -361,6 +365,11 @@ class MainActivity : AppCompatActivity() {
             // evaluateJavascript returns a JSON-encoded string - "abc123", or
             // the literal text null with no quotes if the key isn't set.
             val authToken = result?.trim('"')?.takeIf { it.isNotBlank() && it != "null" } ?: return@evaluateJavascript
+            // Same token the page uses; mirror it so the background refresh can keep
+            // the schedule current when the WebView isn't running. A fallback for
+            // when the page hasn't called setSessionToken yet (e.g. just updated).
+            Prefs.setAuthToken(this, authToken)
+            ReminderSyncWorker.ensurePeriodic(this)
             sendTokenToServer(serverUrl, authToken, fcmToken)
         }
     }

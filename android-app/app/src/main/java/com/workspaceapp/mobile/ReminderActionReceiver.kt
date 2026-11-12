@@ -85,5 +85,13 @@ class ReminderActionReceiver : BroadcastReceiver() {
             return
         }
         ReminderNotifications.cancel(context, notificationKey)
+        // Confirm it instead of just making the reminder disappear, so a snooze
+        // doesn't look like the task was lost. Removes itself after a few seconds.
+        val snoozeMinutes = (ReminderScheduler.SNOOZE_MILLIS / 60_000L).toInt()
+        ReminderNotifications.showSnoozed(
+            context,
+            intent.getStringExtra(ReminderScheduler.EXTRA_TITLE),
+            snoozeMinutes
+        )
     }
 }

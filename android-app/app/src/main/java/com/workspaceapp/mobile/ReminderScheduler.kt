@@ -66,6 +66,7 @@ object ReminderScheduler {
      * whatever alarm/nag chain they already have. `[]` (or `null`) means "no
      * upcoming reminders".
      */
+    @Synchronized
     fun saveAndSchedule(context: Context, json: String) {
         val clean = json.trim().ifEmpty { "[]" }
         // Validate before touching anything: a malformed payload must leave the
@@ -89,6 +90,7 @@ object ReminderScheduler {
     }
 
     /** Re-arm from the saved copy after a reboot - alarms do not survive one. */
+    @Synchronized
     fun rescheduleSaved(context: Context) {
         val json = Prefs.getReminderSchedule(context) ?: return
         val entries = try {
@@ -100,6 +102,7 @@ object ReminderScheduler {
     }
 
     /** Used when disconnecting from the server: no reminders should outlive it. */
+    @Synchronized
     fun clearAll(context: Context) {
         Prefs.getReminderSchedule(context)?.let { cancelAll(context, it) }
         Prefs.setReminderSchedule(context, "[]")
@@ -171,6 +174,7 @@ object ReminderScheduler {
     }
 
     /** Arms the next repeat of an unresolved local reminder, after one has fired. */
+    @Synchronized
     fun scheduleNextNag(context: Context, fired: Intent) {
         val key = fired.getStringExtra(EXTRA_KEY) ?: return
         val nagSeconds = fired.getIntExtra(EXTRA_NAG_SECONDS, -1)
@@ -230,6 +234,7 @@ object ReminderScheduler {
      * (up to MAX_SNOOZES times), purely on-device - the server knows nothing about
      * snoozes. Returns false when the limit for this occurrence is already used.
      */
+    @Synchronized
     fun snooze(context: Context, fired: Intent): Boolean {
         val itemId = fired.getStringExtra(EXTRA_ITEM_ID)
         val subtaskId = fired.getStringExtra(EXTRA_SUBTASK_ID)
@@ -267,6 +272,7 @@ object ReminderScheduler {
      * including a snooze alarm). Used by the Complete action: it can come from an
      * FCM push, which doesn't know the schedule's occurrence key.
      */
+    @Synchronized
     fun cancelForNotification(context: Context, itemId: String?, subtaskId: String?) {
         val json = Prefs.getReminderSchedule(context) ?: return
         val entries = try {

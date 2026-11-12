@@ -9,13 +9,15 @@ import org.json.JSONObject
  * point of the Home-Assistant-style "generic APK" - this is the only thing
  * that ever changes per install, so the app itself never needs rebuilding
  * when the server-side frontend changes), the current FCM registration token
- * pending being sent to that server, and a login token pending handoff to
- * the WebView right after SettingsActivity signs in natively.
+ * pending being sent to that server, a login token pending handoff to the
+ * WebView right after SettingsActivity signs in natively, and the session
+ * token mirrored by the page for the background schedule refresh.
  */
 object Prefs {
     private const val PREFS_NAME = "workspace_prefs"
     private const val KEY_SERVER_URL = "server_url"
     private const val KEY_FCM_TOKEN = "fcm_token"
+    private const val KEY_AUTH_TOKEN = "auth_token"
     private const val KEY_PENDING_LOGIN_TOKEN = "pending_login_token"
     private const val KEY_REMINDER_SCHEDULE = "reminder_schedule"
     private const val KEY_LAST_NOTIFIED_PREFIX = "last_notified_"
@@ -52,6 +54,26 @@ object Prefs {
     fun setPendingFcmToken(context: Context, token: String) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit().putString(KEY_FCM_TOKEN, token).apply()
+    }
+
+    // ---------- Background schedule refresh ----------
+    //
+    // The frontend owns the login session, but the WorkManager refresh has to run
+    // while the WebView isn't open, so the page mirrors its current token here
+    // (WebAppInterface.setSessionToken). This is the same token the WebView keeps
+    // in localStorage - it is only ever sent back to this app's own server.
+
+    fun getAuthToken(context: Context): String? =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_AUTH_TOKEN, null)
+
+    fun setAuthToken(context: Context, token: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putString(KEY_AUTH_TOKEN, token).apply()
+    }
+
+    fun clearAuthToken(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().remove(KEY_AUTH_TOKEN).apply()
     }
 
     /**
