@@ -8,11 +8,16 @@
     <!-- Required at runtime on Android 13+ for notifications to show at all;
          requested in MainActivity, this just declares the app may ask. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Locally-scheduled reminders: on Android 12+ this must be granted by the
-         user (MainActivity opens the system screen once) for an alarm to fire at
-         its exact time; without it, reminders are still armed but may be delayed.
-         RECEIVE_BOOT_COMPLETED re-arms the saved schedule after a restart. -->
+    <!-- Locally-scheduled reminders: on Android 12+ an alarm only fires at its
+         exact time with this permission. SCHEDULE_EXACT_ALARM has to be granted
+         by the user (MainActivity opens the system screen), while USE_EXACT_ALARM
+         (Android 13+) is granted automatically at install - appropriate here
+         because punctual reminders are the app's whole purpose, and this app is
+         sideloaded rather than distributed through Play, whose exact-alarm policy
+         restricts it to alarm/calendar apps. RECEIVE_BOOT_COMPLETED re-arms the
+         saved schedule after a restart. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application

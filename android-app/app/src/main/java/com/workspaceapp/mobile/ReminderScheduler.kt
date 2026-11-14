@@ -143,14 +143,16 @@ object ReminderScheduler {
                 // at the last sync and the server has not reported it completed, so
                 // keep the reminder alive. If its nag alarm is already armed, leave
                 // it alone - resetting it on every sync would keep pushing the next
-                // nag further away. Otherwise start one now.
+                // nag further away. Otherwise fire now: waiting a whole nag interval
+                // first (the old behaviour) meant a schedule that arrived a moment
+                // after the due time showed the reminder a full interval late.
                 //
                 // Deliberately derived from fire_at rather than the server's
                 // "active" flag: the saved copy can predate the occurrence (e.g. a
                 // reboot before the next sync), and a stale `active: false` must not
                 // silence a reminder that is still unresolved.
                 if (alarmExists(context, key)) continue
-                nextMillis = now + nag * 1000L
+                nextMillis = now + 1000L
             } else {
                 // Past and not outstanding (e.g. a one-off already handled by the
                 // server's own reminder loop): nothing to arm.

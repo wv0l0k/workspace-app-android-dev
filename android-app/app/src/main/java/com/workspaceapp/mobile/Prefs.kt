@@ -22,7 +22,8 @@ object Prefs {
     private const val KEY_REMINDER_SCHEDULE = "reminder_schedule"
     private const val KEY_LAST_NOTIFIED_PREFIX = "last_notified_"
     private const val KEY_LOCAL_OCCURRENCE_PREFIX = "local_occurrence_"
-    private const val KEY_EXACT_ALARM_ASKED = "exact_alarm_asked"
+    private const val KEY_EXACT_ALARM_ASKED = "exact_alarm_asked" // legacy boolean; superseded by the timestamp
+    private const val KEY_EXACT_ALARM_ASKED_AT = "exact_alarm_asked_at"
 
     // Notification actions (Complete/Snooze) - see ReminderActionReceiver.
     private const val KEY_PENDING_ACTIONS = "pending_reminder_actions"
@@ -35,6 +36,10 @@ object Prefs {
     /** How long a locally-completed marker is kept if the synced schedule never
      *  stops containing the item (e.g. the completion never reached the server). */
     private const val LOCAL_COMPLETION_TTL_MS = 30L * 24 * 60 * 60 * 1000
+
+    /** How long to wait before offering the exact-alarm permission again after it
+     *  was declined or dismissed. See shouldAskForExactAlarm(). */
+    private const val EXACT_ALARM_REASK_MILLIS = 3L * 24 * 60 * 60 * 1000
 
     /** Per-reminder snooze state: when the nags resume, how many times this
      *  occurrence has already been snoozed, and which occurrence it was for. */
@@ -138,13 +143,30 @@ object Prefs {
             .edit().putLong(KEY_LAST_NOTIFIED_PREFIX + key, atMillis).apply()
     }
 
-    /** Whether the Android 12+ exact-alarm settings screen has already been shown. */
-    fun wasExactAlarmAsked(context: Context): Boolean =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_EXACT_ALARM_ASKED, false)
+    /**
+     * Whether it's time to show the Android 12+ exact-alarm settings screen again.
+     *
+     * This used to be a plain "asked once, never again" boolean, which meant a
+     * single tap past the screen left reminders permanently inexact - and an
+     * inexact alarm is exactly what makes an 11:00 reminder arrive at 11:00:55.
+     * It is re-offered every few days instead (never on consecutive launches).
+     * A boolean saved by an older build has no timestamp, so it counts as "asked
+     * long ago" and gets one more prompt.
+     */
+    fun shouldAskForExactAlarm(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(KEY_EXACT_ALARM_ASKED, false)) return true
+        val askedAt = prefs.getLong(KEY_EXACT_ALARM_ASKED_AT, 0L)
+        if (askedAt <= 0L) return true
+        return System.currentTimeMillis() - askedAt >= EXACT_ALARM_REASK_MILLIS
+    }
 
     fun setExactAlarmAsked(context: Context) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_EXACT_ALARM_ASKED, true).apply()
+            .edit()
+            .putBoolean(KEY_EXACT_ALARM_ASKED, true)
+            .putLong(KEY_EXACT_ALARM_ASKED_AT, System.currentTimeMillis())
+            .apply()
     }
 
     // ---------- Notification actions: local completion ----------

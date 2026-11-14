@@ -295,9 +295,11 @@ class MainActivity : AppCompatActivity() {
         // Covers the case where onNewToken fired while this Activity wasn't
         // running - pick up whatever's waiting in Prefs every time we come back.
         tryRegisterPushToken()
-        // Re-arm local reminders. Mostly a no-op (same alarms replaced in place),
-        // but it covers the case where exact-alarm permission was only granted
+        // Covers the case where exact-alarm permission was only granted
         // while the app was away, and OEMs that don't deliver BOOT_COMPLETED.
+        // Re-check the permission first: once it's granted, the re-arm below
+        // switches every alarm from inexact to exact.
+        requestExactAlarmPermissionIfNeeded()
         ReminderScheduler.rescheduleSaved(this)
         // A notification action taken while the app was in the background is still
         // queued natively; send it now that the page can use its auth token. The
@@ -421,16 +423,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Android 12+ requires the user to allow exact alarms before a reminder can be
-     * guaranteed to fire at its set time (without it, the OS may delay/batch it).
-     * Shown once; the system permission page is the only place it can be granted.
-     * Reminders still work without it, just less punctually - see ReminderScheduler.
+     * Android 12+ needs exact-alarm permission for a reminder to fire at its set
+     * time. Without it the OS batches alarm delivery, which is how a reminder set
+     * for 11:00 can arrive at 11:00:55 - so this is worth re-checking rather than
+     * asking once and giving up if the user tapped past it the first time.
+     * `Prefs.shouldAskForExactAlarm` throttles the screen so it can't nag on every
+     * launch. Android 13+ normally never reaches here at all: USE_EXACT_ALARM in
+     * the manifest is granted automatically, so `canScheduleExactAlarms()` is true.
      */
     private fun requestExactAlarmPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         val alarmManager = getSystemService(AlarmManager::class.java)
         if (alarmManager.canScheduleExactAlarms()) return
-        if (Prefs.wasExactAlarmAsked(this)) return
+        if (!Prefs.shouldAskForExactAlarm(this)) return
         Prefs.setExactAlarmAsked(this)
         try {
             startActivity(
