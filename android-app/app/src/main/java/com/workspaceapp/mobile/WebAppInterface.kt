@@ -83,11 +83,17 @@ class WebAppInterface(private val activity: MainActivity) {
             ReminderActionSyncWorker.cancel(activity)
             return
         }
+        // The push-encryption key is derived from this token (see PushCrypto), so a
+        // changed session means the server must replace the key it encrypts to this
+        // device with. Re-register only when it actually changed - a normal boot with
+        // the same session doesn't need another request.
+        val changed = Prefs.getAuthToken(activity) != token
         Prefs.setAuthToken(activity, token)
         ReminderSyncWorker.ensurePeriodic(activity)
         // A token arriving is exactly when a completion queued while offline can
         // finally be sent.
         ReminderActionSyncWorker.syncSoon(activity)
+        if (changed) activity.registerPushTokenSoon()
     }
 
     @JavascriptInterface

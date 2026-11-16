@@ -12,6 +12,11 @@ import com.google.firebase.messaging.RemoteMessage
  * shows up the same way regardless of whether the app was open, backgrounded,
  * or not running at all.
  *
+ * The data map is encrypted for this specific device (see PushCrypto): it arrives
+ * as {"enc": "1", "payload": "..."} and is decrypted here with the key derived from
+ * the login session mirrored by the WebView. Firebase therefore never sees a task
+ * title, note, or item id.
+ *
  * This path only works while the phone has a connection. The locally-scheduled
  * alarm path exists so the same reminder still fires offline; when both are
  * active, the shared "last notified" bookkeeping below prevents a duplicate.
@@ -29,10 +34,13 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
 
+        val data = decryptPayload(message.data)
+        if (data.isEmpty()) return
+
         // A silent "the reminder schedule changed" ping (see request_sync_ping() in
         // main.py): refresh the local schedule in the background and show nothing.
         // This is what makes a task edited on another device reach a closed app.
-        if (message.data["type"] == "sync") {
+        if (data["type"] == "sync") {
             ReminderSyncWorker.refreshSoon(this)
             // Also a good moment to retry a completion queued from a notification
             // while the phone had no connection.
@@ -40,17 +48,17 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        val itemId = message.data["item_id"]
+        val itemId = data["item_id"]
         // No title *and* no item id means this isn't a reminder at all - it's a
         // control message this build doesn't know (a newer silent ping type, say).
         // Showing it would just produce an empty notification titled "Workspace".
-        if (message.data["title"].isNullOrBlank() && itemId.isNullOrBlank()) return
+        if (data["title"].isNullOrBlank() && itemId.isNullOrBlank()) return
 
-        val title = message.data["title"] ?: getString(R.string.app_name)
-        val body = message.data["body"] ?: ""
-        val workspaceId = message.data["workspace_id"]
-        val kind = message.data["kind"]
-        val subtaskId = message.data["subtask_id"]
+        val title = data["title"] ?: getString(R.string.app_name)
+        val body = data["body"] ?: ""
+        val workspaceId = data["workspace_id"]
+        val kind = data["kind"]
+        val subtaskId = data["subtask_id"]
 
         // Stable identity shared with the local-alarm path: item id, plus the
         // subtask id for a checklist step (several steps share the parent item id).
@@ -61,7 +69,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         // and delivered on reconnect. The occurrence time (not arrival time) is what
         // matters: a push for a genuinely later occurrence has a larger fire_at and
         // is still shown.
-        val fireAt = message.data["fire_at"]?.toLongOrNull() ?: 0L
+        val fireAt = data["fire_at"]?.toLongOrNull() ?: 0L
         if (fireAt > 0 && Prefs.getLastLocalOccurrence(this, key) >= fireAt) return
 
         // Completed from a notification (the server PATCH may still be queued), or
@@ -91,7 +99,27 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             kind = kind,
             subtaskId = subtaskId,
             occurrenceEpoch = fireAt,
-            nagSeconds = message.data["nag_seconds"]?.toIntOrNull()?.takeIf { it > 0 },
+            nagSeconds = data["nag_seconds"]?.toIntOrNull()?.takeIf { it > 0 },
         )
+    }
+
+    /**
+     * Returns the message's data map, decrypted when it is the encrypted envelope.
+     *
+     * An empty result means "show nothing": the device is logged out, or the payload
+     * was encrypted with a key this install no longer has. In the latter case a
+     * generic notification is still posted, so a reminder is not silently lost, but
+     * it contains no content, no deep link, and no actions.
+     */
+    private fun decryptPayload(raw: Map<String, String>): Map<String, String> {
+        if (!PushCrypto.isEncrypted(raw)) return raw
+
+        val sessionToken = Prefs.getAuthToken(this) ?: return emptyMap()
+        val decrypted = PushCrypto.decrypt(sessionToken, raw["payload"] ?: "")
+        if (decrypted == null) {
+            ReminderNotifications.showUndecryptable(this)
+            return emptyMap()
+        }
+        return decrypted
     }
 }

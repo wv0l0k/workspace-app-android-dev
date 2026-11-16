@@ -39,6 +39,11 @@ object ReminderNotifications {
      *  stacking them; deliberately unrelated to any reminder's own id. */
     private const val SNOOZE_CONFIRM_ID = 0x5E0021
 
+    /** Bookkeeping/notification id for an encrypted push this install could not read.
+     *  See showUndecryptable(). */
+    private const val UNDECRYPTABLE_KEY = "__undecryptable_push__"
+    private const val UNDECRYPTABLE_ID = 0x5E0022
+
     /** How close two notifications for the same key have to be to count as the
      *  same occurrence. Long enough to cover FCM/local delivery skew, short
      *  enough that a genuine 1-minute nag still alerts on its next round. */
@@ -147,6 +152,48 @@ object ReminderNotifications {
 
     fun cancel(context: Context, key: String) {
         context.getSystemService(NotificationManager::class.java).cancel(key.hashCode())
+    }
+
+    /**
+     * A last resort when an encrypted push cannot be decrypted - most likely the
+     * device's login session changed before the server's copy of its push key caught
+     * up. The server treats this path as generic on purpose: showing something is
+     * better than silently dropping a reminder, but this notification deliberately
+     * carries no task title, note, deep link, or actions, because none of that could
+     * be read. Opening the app re-registers and restores full notifications.
+     */
+    fun showUndecryptable(context: Context) {
+        val now = System.currentTimeMillis()
+        if (now - Prefs.getLastNotified(context, UNDECRYPTABLE_KEY) < DEDUPE_WINDOW_MS) return
+        Prefs.setLastNotified(context, UNDECRYPTABLE_KEY, now)
+
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, "Reminders", NotificationManager.IMPORTANCE_HIGH)
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            UNDECRYPTABLE_ID,
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setContentTitle("Workspace reminder")
+            .setContentText("Open the app to see what it's for.")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("Open the app to see what it's for."))
+            .setSmallIcon(R.drawable.ic_stat_workspace)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .build()
+        notificationManager.notify(UNDECRYPTABLE_ID, notification)
     }
 
     /**

@@ -353,6 +353,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Re-registers the FCM token after the page's session token changes. Called from
+     * the JS bridge (WebAppInterface.setSessionToken) so the server's stored push key
+     * - derived from that session - is replaced along with it. The bridge runs on a
+     * background thread, and tryRegisterPushToken() touches the WebView, so hop to
+     * the main thread first.
+     */
+    fun registerPushTokenSoon() {
+        mainHandler.post { if (::webView.isInitialized) tryRegisterPushToken() }
+    }
+
+    /**
      * Registration needs two things that live in two different places: the FCM
      * token (native side, from Firebase) and the app's own login token (JS
      * side, in the WebView's localStorage - the exact same one the browser
@@ -384,7 +395,16 @@ class MainActivity : AppCompatActivity() {
         // {"type": "sync"} schedule-refresh ping. Older builds don't send it, so the
         // server keeps pinging only phones that won't render the ping as an empty
         // notification. See send_push(silent=True) in main.py.
-        val json = JSONObject().put("token", fcmToken).put("sync_capable", true).toString()
+        //
+        // enc_capable tells the server this build can decrypt encrypted push
+        // payloads. The server derives a per-device key from the same session token
+        // and sends full content, encrypted; a build without it only ever gets a
+        // generic notification, never plaintext content.
+        val json = JSONObject()
+            .put("token", fcmToken)
+            .put("sync_capable", true)
+            .put("enc_capable", true)
+            .toString()
         val body = json.toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url("$serverUrl/api/push/register")
